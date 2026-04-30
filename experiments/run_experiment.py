@@ -136,7 +136,12 @@ def _run_candidate(
     train_part_df: pd.DataFrame,
     predict_df: pd.DataFrame,
     experiment_id: str,
+    phase: str,
 ) -> tuple[float, np.ndarray, np.ndarray, dict[str, Any], pd.Series]:
+    print(
+        f"[{phase}] building features: train_rows={len(train_part_df)} predict_rows={len(predict_df)}",
+        flush=True,
+    )
     y = train_part_df[TARGET].astype(str)
     unknown_targets = sorted(set(y.unique()) - set(CLASS_ORDER))
     if unknown_targets:
@@ -160,13 +165,16 @@ def _run_candidate(
             "holdout_size": HOLDOUT_SIZE,
             "artifacts_dir": ARTIFACTS_DIR,
             "experiment_id": experiment_id,
+            "phase": phase,
         }
     )
 
+    print(f"[{phase}] starting {N_SPLITS}-fold CV", flush=True)
     oof_pred, predict_pred, model_metadata = candidate.fit_predict_cv(X, y, X_predict, metadata)
     oof_pred = _validate_labels("oof_pred", oof_pred, len(train_part_df))
     predict_pred = _validate_labels("predict_pred", predict_pred, len(predict_df))
     score = float(balanced_accuracy_score(y, oof_pred))
+    print(f"[{phase}] completed CV balanced_accuracy={score:.10f}", flush=True)
     return score, oof_pred, predict_pred, dict(model_metadata or {}), y
 
 
@@ -211,13 +219,20 @@ def main() -> None:
     holdout_features = holdout_df.drop(columns=[TARGET])
     holdout_y = holdout_df[TARGET].astype(str)
 
+    print("[dev_cv] evaluating candidate on dev split with internal holdout", flush=True)
     cv_score, _, holdout_pred, dev_model_metadata, _ = _run_candidate(
-        candidate, dev_df, holdout_features, experiment_id
+        candidate, dev_df, holdout_features, experiment_id, "dev_cv"
     )
     holdout_score = float(balanced_accuracy_score(holdout_y, holdout_pred))
+    print(f"[holdout] balanced_accuracy={holdout_score:.10f}", flush=True)
 
+    print("[full_train] training final models for Kaggle test prediction", flush=True)
     _, _, test_pred, final_model_metadata, _ = _run_candidate(
-        candidate, train_df.reset_index(drop=True), kaggle_test_df.reset_index(drop=True), experiment_id
+        candidate,
+        train_df.reset_index(drop=True),
+        kaggle_test_df.reset_index(drop=True),
+        experiment_id,
+        "full_train",
     )
 
     submission = sample_submission.copy()

@@ -65,6 +65,11 @@ def _fit_predict_lightgbm(X, y, X_test, metadata):
     fold_scores = []
 
     for fold, (train_idx, valid_idx) in enumerate(cv_splits):
+        phase = metadata.get("phase", "cv")
+        print(
+            f"[{phase}] fold {fold + 1}/{len(cv_splits)} start: train_rows={len(train_idx)} valid_rows={len(valid_idx)}",
+            flush=True,
+        )
         model = LGBMClassifier(
             objective="multiclass",
             num_class=len(class_order),
@@ -93,7 +98,9 @@ def _fit_predict_lightgbm(X, y, X_test, metadata):
 
         from sklearn.metrics import balanced_accuracy_score
 
-        fold_scores.append(float(balanced_accuracy_score(y.iloc[valid_idx], valid_pred)))
+        fold_score = float(balanced_accuracy_score(y.iloc[valid_idx], valid_pred))
+        fold_scores.append(fold_score)
+        print(f"[{phase}] fold {fold + 1}/{len(cv_splits)} done: balanced_accuracy={fold_score:.10f}", flush=True)
 
     test_pred = _majority_vote(test_fold_preds, class_order)
     return oof_pred, test_pred, {"model": "lightgbm", "fold_scores": fold_scores}
@@ -128,6 +135,11 @@ def _fit_predict_histgb(X, y, X_test, metadata):
     fold_scores = []
 
     for fold, (train_idx, valid_idx) in enumerate(cv_splits):
+        phase = metadata.get("phase", "cv")
+        print(
+            f"[{phase}] fold {fold + 1}/{len(cv_splits)} start: train_rows={len(train_idx)} valid_rows={len(valid_idx)}",
+            flush=True,
+        )
         model = Pipeline(
             steps=[
                 ("prep", preprocessor),
@@ -147,7 +159,9 @@ def _fit_predict_histgb(X, y, X_test, metadata):
         valid_pred = model.predict(X.iloc[valid_idx])
         oof_pred[valid_idx] = valid_pred
         test_fold_preds.append(model.predict(X_test))
-        fold_scores.append(float(balanced_accuracy_score(y.iloc[valid_idx], valid_pred)))
+        fold_score = float(balanced_accuracy_score(y.iloc[valid_idx], valid_pred))
+        fold_scores.append(fold_score)
+        print(f"[{phase}] fold {fold + 1}/{len(cv_splits)} done: balanced_accuracy={fold_score:.10f}", flush=True)
 
     test_pred = _majority_vote(test_fold_preds, class_order)
     return oof_pred, test_pred, {"model": "hist_gradient_boosting", "fold_scores": fold_scores}
