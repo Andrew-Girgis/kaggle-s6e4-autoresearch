@@ -1,0 +1,41 @@
+{
+  "balanced_accuracy": 0.9701541826318434,
+  "candidate_sha256": "2942e45ee94da5c4",
+  "experiment_id": "20260430_051216",
+  "holdout_balanced_accuracy": 0.9724157249775693,
+  "model_metadata": {
+    "dev_cv": {
+      "class_weight": "balanced",
+      "fold_scores": [
+        0.9720422147477054,
+        0.9715438425868141,
+        0.9695583684781294,
+        0.9697823634303466,
+        0.9678446797316331
+      ],
+      "model": "lightgbm"
+    },
+    "final_full_train": {
+      "class_weight": "balanced",
+      "fold_scores": [
+        0.969746293198989,
+        0.9718062266988384,
+        0.972051483089902,
+        0.9703841177096227,
+        0.9708488816502424
+      ],
+      "model": "lightgbm"
+    },
+    "guardrail_metric": "holdout_balanced_accuracy",
+    "holdout_size": 0.2,
+    "selection_metric": "balanced_accuracy",
+    "selection_split": "dev_cv"
+  },
+  "name": "lgbm_balanced_tiny_trees",
+  "notes": "Test tiny class-weighted LightGBM trees with num_leaves=8 and min_child_samples=500.",
+  "previous_best_balanced_accuracy": 0.9697635547550375,
+  "seed": 42,
+  "source_submission_path": "experiments/artifacts/submission_20260430_051216.csv",
+  "submission_path": "experiments/best_submission.csv",
+  "timestamp_utc": "2026-04-30T05:14:37.153946+00:00"
+}
