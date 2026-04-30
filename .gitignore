@@ -2,4 +2,12 @@
 __pycache__/
 *.pyc
 .ipynb_checkpoints/
+.env
+.env.*
+.kaggle/
+*.log
 data/
+experiments/artifacts/
+experiments/results.csv
+experiments/best_config.json
+experiments/best_submission.csv
