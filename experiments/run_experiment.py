@@ -20,7 +20,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 from sklearn.metrics import balanced_accuracy_score
-from sklearn.model_selection import StratifiedKFold
+from sklearn.model_selection import StratifiedKFold, train_test_split
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -32,6 +32,7 @@ ID_COLUMN = "id"
 CLASS_ORDER = ["Low", "Medium", "High"]
 N_SPLITS = 5
 CV_SEED = 42
+HOLDOUT_SIZE = 0.20
 RESULTS_PATH = EXPERIMENTS_DIR / "results.csv"
 BEST_CONFIG_PATH = EXPERIMENTS_DIR / "best_config.json"
 BEST_SUBMISSION_PATH = EXPERIMENTS_DIR / "best_submission.csv"
@@ -96,6 +97,7 @@ def _append_result(row: dict[str, Any]) -> None:
         "timestamp_utc",
         "name",
         "balanced_accuracy",
+        "holdout_balanced_accuracy",
         "improved",
         "duration_seconds",
         "seed",
@@ -129,42 +131,18 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def main() -> None:
-    args = _parse_args()
-    smoke_mode = bool(args.smoke_rows or args.smoke_test_rows)
-    start = time.time()
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    experiment_id = timestamp
-    ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
-
-    train_df = pd.read_csv(DATA_DIR / "train.csv")
-    test_df = pd.read_csv(DATA_DIR / "test.csv")
-    sample_submission = pd.read_csv(DATA_DIR / "sample_submission.csv")
-
-    if args.smoke_rows:
-        train_df = train_df.groupby(TARGET, group_keys=False).sample(
-            n=max(1, args.smoke_rows // len(CLASS_ORDER)), random_state=CV_SEED
-        )
-        train_df = train_df.sample(frac=1.0, random_state=CV_SEED).reset_index(drop=True)
-    if args.smoke_test_rows:
-        test_df = test_df.head(args.smoke_test_rows).copy()
-        sample_submission = sample_submission.head(args.smoke_test_rows).copy()
-
-    if TARGET not in train_df.columns:
-        raise ValueError(f"Missing target column {TARGET!r} in train.csv")
-    if ID_COLUMN not in test_df.columns or ID_COLUMN not in sample_submission.columns:
-        raise ValueError("Missing id column in test.csv or sample_submission.csv")
-
-    candidate = _load_candidate()
-    config = dict(candidate.get_experiment_config())
-    candidate_sha = _file_sha256(EXPERIMENTS_DIR / "candidate.py")
-
-    y = train_df[TARGET].astype(str)
+def _run_candidate(
+    candidate: Any,
+    train_part_df: pd.DataFrame,
+    predict_df: pd.DataFrame,
+    experiment_id: str,
+) -> tuple[float, np.ndarray, np.ndarray, dict[str, Any], pd.Series]:
+    y = train_part_df[TARGET].astype(str)
     unknown_targets = sorted(set(y.unique()) - set(CLASS_ORDER))
     if unknown_targets:
         raise ValueError(f"Unknown target labels in training data: {unknown_targets}")
 
-    X, X_test, returned_y, metadata = candidate.build_features(train_df.copy(), test_df.copy())
+    X, X_predict, returned_y, metadata = candidate.build_features(train_part_df.copy(), predict_df.copy())
     if returned_y is not None:
         y = pd.Series(returned_y).astype(str)
 
@@ -179,16 +157,68 @@ def main() -> None:
             "cv_splits": list(cv.split(X, y)),
             "n_splits": N_SPLITS,
             "cv_seed": CV_SEED,
+            "holdout_size": HOLDOUT_SIZE,
             "artifacts_dir": ARTIFACTS_DIR,
             "experiment_id": experiment_id,
         }
     )
 
-    oof_pred, test_pred, model_metadata = candidate.fit_predict_cv(X, y, X_test, metadata)
-    oof_pred = _validate_labels("oof_pred", oof_pred, len(train_df))
-    test_pred = _validate_labels("test_pred", test_pred, len(test_df))
-
+    oof_pred, predict_pred, model_metadata = candidate.fit_predict_cv(X, y, X_predict, metadata)
+    oof_pred = _validate_labels("oof_pred", oof_pred, len(train_part_df))
+    predict_pred = _validate_labels("predict_pred", predict_pred, len(predict_df))
     score = float(balanced_accuracy_score(y, oof_pred))
+    return score, oof_pred, predict_pred, dict(model_metadata or {}), y
+
+
+def main() -> None:
+    args = _parse_args()
+    smoke_mode = bool(args.smoke_rows or args.smoke_test_rows)
+    start = time.time()
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    experiment_id = timestamp
+    ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
+
+    train_df = pd.read_csv(DATA_DIR / "train.csv")
+    kaggle_test_df = pd.read_csv(DATA_DIR / "test.csv")
+    sample_submission = pd.read_csv(DATA_DIR / "sample_submission.csv")
+
+    if args.smoke_rows:
+        train_df = train_df.groupby(TARGET, group_keys=False).sample(
+            n=max(1, args.smoke_rows // len(CLASS_ORDER)), random_state=CV_SEED
+        )
+        train_df = train_df.sample(frac=1.0, random_state=CV_SEED).reset_index(drop=True)
+    if args.smoke_test_rows:
+        kaggle_test_df = kaggle_test_df.head(args.smoke_test_rows).copy()
+        sample_submission = sample_submission.head(args.smoke_test_rows).copy()
+
+    if TARGET not in train_df.columns:
+        raise ValueError(f"Missing target column {TARGET!r} in train.csv")
+    if ID_COLUMN not in kaggle_test_df.columns or ID_COLUMN not in sample_submission.columns:
+        raise ValueError("Missing id column in test.csv or sample_submission.csv")
+
+    candidate = _load_candidate()
+    config = dict(candidate.get_experiment_config())
+    candidate_sha = _file_sha256(EXPERIMENTS_DIR / "candidate.py")
+
+    dev_df, holdout_df = train_test_split(
+        train_df,
+        test_size=HOLDOUT_SIZE,
+        stratify=train_df[TARGET],
+        random_state=CV_SEED,
+    )
+    dev_df = dev_df.reset_index(drop=True)
+    holdout_df = holdout_df.reset_index(drop=True)
+    holdout_features = holdout_df.drop(columns=[TARGET])
+    holdout_y = holdout_df[TARGET].astype(str)
+
+    cv_score, _, holdout_pred, dev_model_metadata, _ = _run_candidate(
+        candidate, dev_df, holdout_features, experiment_id
+    )
+    holdout_score = float(balanced_accuracy_score(holdout_y, holdout_pred))
+
+    _, _, test_pred, final_model_metadata, _ = _run_candidate(
+        candidate, train_df.reset_index(drop=True), kaggle_test_df.reset_index(drop=True), experiment_id
+    )
 
     submission = sample_submission.copy()
     submission[TARGET] = test_pred
@@ -196,15 +226,24 @@ def main() -> None:
     submission.to_csv(submission_path, index=False)
 
     best_score = _read_best_score()
-    improved = _is_improvement(score, best_score)
+    improved = _is_improvement(cv_score, best_score)
     duration = time.time() - start
 
-    model_metadata_json = json.dumps(model_metadata or {}, sort_keys=True, default=_json_default)
+    model_metadata = {
+        "dev_cv": dev_model_metadata,
+        "final_full_train": final_model_metadata,
+        "holdout_size": HOLDOUT_SIZE,
+        "selection_metric": "balanced_accuracy",
+        "selection_split": "dev_cv",
+        "guardrail_metric": "holdout_balanced_accuracy",
+    }
+    model_metadata_json = json.dumps(model_metadata, sort_keys=True, default=_json_default)
     row = {
         "experiment_id": experiment_id,
         "timestamp_utc": datetime.now(timezone.utc).isoformat(),
         "name": config.get("name", "unnamed"),
-        "balanced_accuracy": f"{score:.10f}",
+        "balanced_accuracy": f"{cv_score:.10f}",
+        "holdout_balanced_accuracy": f"{holdout_score:.10f}",
         "improved": str(improved).lower(),
         "duration_seconds": f"{duration:.2f}",
         "seed": config.get("seed", ""),
@@ -221,7 +260,8 @@ def main() -> None:
         best_config = {
             "experiment_id": experiment_id,
             "timestamp_utc": row["timestamp_utc"],
-            "balanced_accuracy": score,
+            "balanced_accuracy": cv_score,
+            "holdout_balanced_accuracy": holdout_score,
             "previous_best_balanced_accuracy": best_score,
             "name": row["name"],
             "notes": row["notes"],
@@ -229,7 +269,7 @@ def main() -> None:
             "candidate_sha256": candidate_sha,
             "submission_path": str(BEST_SUBMISSION_PATH.relative_to(ROOT)),
             "source_submission_path": str(submission_path.relative_to(ROOT)),
-            "model_metadata": model_metadata or {},
+            "model_metadata": model_metadata,
         }
         with BEST_CONFIG_PATH.open("w") as f:
             json.dump(best_config, f, indent=2, sort_keys=True, default=_json_default)
@@ -237,7 +277,8 @@ def main() -> None:
 
     print(
         "FINAL_METRIC "
-        f"balanced_accuracy={score:.10f} "
+        f"balanced_accuracy={cv_score:.10f} "
+        f"holdout_balanced_accuracy={holdout_score:.10f} "
         f"improved={str(improved).lower()} "
         f"experiment_id={experiment_id} "
         f"smoke={str(smoke_mode).lower()}"

@@ -53,8 +53,10 @@ Run a quick harness smoke test:
 The evaluator prints a final line like:
 
 ```text
-FINAL_METRIC balanced_accuracy=0.9406666667 improved=true experiment_id=20260430_033027 smoke=true
+FINAL_METRIC balanced_accuracy=0.9406666667 holdout_balanced_accuracy=0.9380000000 improved=true experiment_id=20260430_033027 smoke=true
 ```
+
+The evaluator uses only `data/train.csv` for model selection: a fixed 20% stratified internal holdout is reserved, 5-fold CV runs on the remaining dev split, and the holdout score is reported as an anti-overfitting guardrail. Kaggle `data/test.csv` is used only after evaluation to generate a submission file.
 
 ## Autoresearch Workflow
 
@@ -77,10 +79,15 @@ Those generated outputs are ignored by Git. Yardstick snapshots under `experimen
 
 See `program.md` for the full overnight loop, protected-file rules, and yardstick commit procedure.
 
+## Notebook Submission
+
+The autonomous loop is script-first for reliable diffs and repeatable scoring, but the final Kaggle submission should be packaged as a notebook. Keep `experiments/candidate.py` portable so the best pipeline can be moved into a notebook cleanly: no local absolute paths, no dependency on ignored artifacts, and no reads from experiment logs or prior submissions.
+
 ## Safety Notes
 
 - Do not commit Kaggle data or credentials.
 - Do not hand-label test data or infer test labels manually.
 - Do not optimize manually against public leaderboard feedback.
 - Do not submit to Kaggle automatically.
+- Do not use Kaggle test rows for training, scoring, feature selection, threshold tuning, calibration, or experiment decisions.
 - Keep `experiments/run_experiment.py` stable during normal research so scores stay comparable.

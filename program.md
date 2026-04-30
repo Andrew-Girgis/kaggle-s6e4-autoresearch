@@ -62,12 +62,21 @@ If the virtual environment is not activated, use:
 
 The evaluator uses deterministic 5-fold stratified CV with seed `42`. A real run appends to `experiments/results.csv`, writes a submission under `experiments/artifacts/`, and updates `experiments/best_config.json` plus `experiments/best_submission.csv` only when CV improves.
 
+The evaluator uses `data/train.csv` only for model selection:
+
+- Reserve a fixed 20% stratified internal holdout from `train.csv`.
+- Run 5-fold CV only on the remaining 80% dev split.
+- Use dev CV balanced accuracy as the primary improvement metric.
+- Use holdout balanced accuracy as an anti-overfitting guardrail.
+- Train on full `train.csv` only after evaluation, solely to generate predictions for Kaggle `data/test.csv`.
+
 ## What You CAN Do
 
 - Modify `experiments/candidate.py` - this is the only file edited during normal autonomous research.
 - Change data cleaning, encoders, feature engineering, feature selection, models, hyperparameters, ensembling, calibration, and thresholding inside `candidate.py`.
 - Read `experiments/results.csv`, `experiments/best_config.json`, and prior generated artifacts to decide what to try next.
 - Create yardstick snapshots and yardstick commits only at the milestones documented below.
+- Keep `candidate.py` notebook-portable: avoid local absolute paths, hidden state, generated artifact dependencies, and code that cannot be pasted into a Kaggle notebook.
 
 Keep this public API stable:
 
@@ -92,6 +101,10 @@ def fit_predict_cv(X, y, X_test, metadata):
 - Do not submit to Kaggle automatically.
 - Do not weaken the evaluator or change the CV protocol to make a score look better.
 - Do not install new dependencies during an overnight run unless the human explicitly approves.
+- Do not let `candidate.py` read `experiments/results.csv`, `experiments/best_config.json`, `experiments/best_submission.csv`, prior submissions, or any generated artifacts to decide features, thresholds, models, or predictions.
+- Do not train on internal holdout labels or use holdout labels for feature selection, threshold tuning, calibration, pseudo-labeling, or model choice except as the evaluator's final guardrail score.
+- Do not use Kaggle `data/test.csv` for fitting, scoring, feature selection, threshold tuning, calibration, or experiment decisions; it is only for final prediction generation after train-only evaluation.
+- Do not use row IDs, file order, or submission formatting tricks as target proxies unless their value is validated by train-only CV and holdout behavior.
 
 ## Data Science Workflow
 
@@ -111,6 +124,8 @@ Each experiment should test a concrete hypothesis. Good experiment categories in
 
 Avoid public leaderboard overfitting and avoid large rewrites unless simpler experiments have plateaued.
 
+Do not hill-climb directly on the internal holdout. A change with better dev CV but a large holdout collapse is suspicious and should usually be discarded or investigated. A change with slightly worse dev CV but better holdout should not automatically replace the current best unless it is clearly more robust and the reasoning is documented.
+
 ## First Run
 
 The first real run should establish the baseline. Do not change `experiments/candidate.py` before the baseline unless the baseline is broken.
@@ -122,10 +137,10 @@ After the baseline run finishes, create the `baseline` yardstick snapshot and co
 The evaluator prints one final machine-readable line:
 
 ```text
-FINAL_METRIC balanced_accuracy=<score> improved=<true|false> experiment_id=<id> smoke=<true|false>
+FINAL_METRIC balanced_accuracy=<dev_cv_score> holdout_balanced_accuracy=<holdout_score> improved=<true|false> experiment_id=<id> smoke=<true|false>
 ```
 
-Use `balanced_accuracy` as the primary metric. Higher is better.
+Use `balanced_accuracy` as the primary dev CV metric. Use `holdout_balanced_accuracy` as the guardrail metric. Higher is better for both.
 
 ## Logging Results
 
@@ -138,7 +153,7 @@ experiments/best_submission.csv
 experiments/artifacts/
 ```
 
-Use `experiments/results.csv` as the run ledger. Use `experiments/best_config.json` to identify the current best score, experiment id, candidate hash, and source submission path.
+Use `experiments/results.csv` as the run ledger. Use `experiments/best_config.json` to identify the current best dev CV score, holdout score, experiment id, candidate hash, and source submission path.
 
 ## Yardstick Snapshots
 
@@ -167,7 +182,7 @@ Snapshot contents:
 - `candidate.py` - exact current `experiments/candidate.py` at the milestone.
 - `config.json` - copy of `experiments/best_config.json` if it exists; otherwise write a small JSON file explaining that no best config exists yet.
 - `submission.csv` - copy of `experiments/best_submission.csv` if it exists; otherwise omit it and note that in `summary.md`.
-- `summary.md` - short human-readable summary with milestone name, timestamp, run count, current CV score, best CV score, experiment id, candidate notes, and whether this milestone is the best known candidate.
+- `summary.md` - short human-readable summary with milestone name, timestamp, run count, current dev CV score, holdout score, best dev CV score, experiment id, candidate notes, and whether this milestone is the best known candidate.
 
 Recommended commands for a milestone:
 
@@ -210,10 +225,10 @@ LOOP FOREVER:
 4. Modify `experiments/candidate.py` directly.
 5. Update `get_experiment_config()["name"]` and `get_experiment_config()["notes"]` to describe the experiment.
 6. Run the experiment with `python experiments/run_experiment.py`.
-7. Read the final `FINAL_METRIC` line.
+7. Read the final `FINAL_METRIC` line, including both dev CV and holdout scores.
 8. If the run crashed, fix obvious bugs such as typos, missing imports, or shape errors and rerun; if the idea is fundamentally broken, discard the idea and move on.
-9. If the score improved, keep the candidate and continue from it.
-10. If the score is worse, decide whether it is useful foundation for the next experiment; otherwise restore the last better `candidate.py` state.
+9. If dev CV improved and holdout did not collapse, keep the candidate and continue from it.
+10. If dev CV is worse, or holdout behavior suggests overfitting, decide whether it is useful foundation for the next experiment; otherwise restore the last better `candidate.py` state.
 11. If the completed run hits `baseline`, `run_10`, `run_100`, or `run_1000`, create the yardstick snapshot and Git commit before continuing.
 12. Repeat until manually interrupted.
 
@@ -237,7 +252,14 @@ For crashes:
 
 The notebook is not the autonomous experiment runner. The script-based evaluator is the source of truth for comparable experiments.
 
-Use notebooks for EDA, explanation, or final reporting only. If notebook execution is needed later, install notebook execution tooling only with human approval and run it separately from the core loop, for example with `nbconvert` or `papermill`.
+Use notebooks for EDA, explanation, or final Kaggle submission packaging only. The final competition submission must be a notebook, so keep `candidate.py` easy to port:
+
+- Keep feature engineering and model code in clear functions.
+- Avoid local-only paths outside Kaggle's expected input paths.
+- Avoid reading autoresearch logs, best configs, prior submissions, or generated artifacts from notebook code.
+- Ensure the final notebook can train from Kaggle train data and write `submission.csv` without relying on files ignored by Git.
+
+If notebook execution or generation is needed later, install notebook execution tooling only with human approval and run it separately from the core loop, for example with `nbconvert` or `papermill`.
 
 ## NEVER STOP
 
