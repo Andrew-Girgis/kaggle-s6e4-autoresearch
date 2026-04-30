@@ -14,8 +14,8 @@ import pandas as pd
 
 def get_experiment_config() -> dict:
     return {
-        "name": "lgbm_balanced_tiny_trees",
-        "notes": "Test tiny class-weighted LightGBM trees with num_leaves=8 and min_child_samples=500.",
+        "name": "lgbm_tiny_custom_weight_leaves15",
+        "notes": "Refine leaf-count search around the leaves14 best by testing num_leaves=15.",
         "seed": 42,
     }
 
@@ -73,12 +73,12 @@ def _fit_predict_lightgbm(X, y, X_test, metadata):
         model = LGBMClassifier(
             objective="multiclass",
             num_class=len(class_order),
-            class_weight="balanced",
-            n_estimators=800,
-            learning_rate=0.045,
-            num_leaves=8,
+            class_weight={"High": 18.0, "Low": 0.62, "Medium": 0.83},
+            n_estimators=1200,
+            learning_rate=0.03,
+            num_leaves=15,
             max_depth=-1,
-            min_child_samples=500,
+            min_child_samples=300,
             subsample=0.9,
             subsample_freq=1,
             colsample_bytree=0.9,
@@ -104,7 +104,7 @@ def _fit_predict_lightgbm(X, y, X_test, metadata):
         print(f"[{phase}] fold {fold + 1}/{len(cv_splits)} done: balanced_accuracy={fold_score:.10f}", flush=True)
 
     test_pred = _majority_vote(test_fold_preds, class_order)
-    return oof_pred, test_pred, {"model": "lightgbm", "fold_scores": fold_scores, "class_weight": "balanced"}
+    return oof_pred, test_pred, {"model": "lightgbm", "fold_scores": fold_scores, "class_weight": "custom_high18_low062_medium083", "num_leaves": 15}
 
 
 def _fit_predict_histgb(X, y, X_test, metadata):
