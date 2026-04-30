@@ -1,0 +1,39 @@
+{
+  "balanced_accuracy": 0.9606334175760881,
+  "candidate_sha256": "749de48b1301bcd6",
+  "experiment_id": "20260430_041315",
+  "holdout_balanced_accuracy": 0.9638706794446765,
+  "model_metadata": {
+    "dev_cv": {
+      "fold_scores": [
+        0.9625510698592982,
+        0.9602206271967216,
+        0.9606436110724818,
+        0.9611005106364506,
+        0.9586515822445562
+      ],
+      "model": "lightgbm"
+    },
+    "final_full_train": {
+      "fold_scores": [
+        0.9612450436449681,
+        0.9632340959526052,
+        0.9614722888402049,
+        0.9606048136426396,
+        0.9615928355521356
+      ],
+      "model": "lightgbm"
+    },
+    "guardrail_metric": "holdout_balanced_accuracy",
+    "holdout_size": 0.2,
+    "selection_metric": "balanced_accuracy",
+    "selection_split": "dev_cv"
+  },
+  "name": "baseline_lgbm_or_histgb",
+  "notes": "Strong boring baseline: ordinal categorical encoding with LightGBM if available, otherwise sklearn HistGradientBoosting.",
+  "previous_best_balanced_accuracy": null,
+  "seed": 42,
+  "source_submission_path": "experiments/artifacts/submission_20260430_041315.csv",
+  "submission_path": "experiments/best_submission.csv",
+  "timestamp_utc": "2026-04-30T04:20:29.953573+00:00"
+}
